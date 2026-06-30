@@ -37,8 +37,8 @@ app = Flask(__name__)
 # Configuration
 # --------------------------------------------------------------------------- #
 #
-# Every tunable below can be overridden through an environment variable; the
-# defaults reproduce the previous hardcoded behaviour. See .env.example / README.
+# Every tunable below can be overridden via an environment variable; the defaults
+# match the built-in behaviour. See .env.example / README for the full list.
 
 
 def env_str(name, default):
@@ -76,23 +76,22 @@ MODES = {"mp3", "audio", "video"}
 DEFAULT_MODE = env_str("DEFAULT_MODE", "mp3")
 DEFAULT_QUALITY = env_str("DEFAULT_QUALITY", "best")
 
-# MP3 transcode / cover settings.
-MP3_BITRATE = env_str("MP3_BITRATE", "320k")     # libmp3lame -b:a
-COVER_MAX_PX = env_int("COVER_MAX_PX", 1200)     # longest cover edge
-COVER_QUALITY = env_int("COVER_QUALITY", 5)      # ffmpeg -q:v (2=best..31=worst)
+# MP3 transcode / cover settings (COVER_QUALITY is ffmpeg -q:v: 2=best..31=worst).
+MP3_BITRATE = env_str("MP3_BITRATE", "320k")
+COVER_MAX_PX = env_int("COVER_MAX_PX", 1200)
+COVER_QUALITY = env_int("COVER_QUALITY", 5)
 
-# yt-dlp robustness knobs.
 YTDLP_RETRIES = env_int("YTDLP_RETRIES", 10)
 YTDLP_CONCURRENT_FRAGMENTS = env_int("YTDLP_CONCURRENT_FRAGMENTS", 4)
-# The EJS challenge solver is required for most videos; expose a kill switch in
-# case GitHub is unreachable and you only need already-unlocked formats.
+# Kill switch for the EJS solver in case GitHub is unreachable and you only need
+# already-unlocked formats.
 YTDLP_USE_EJS = env_bool("YTDLP_USE_EJS", True)
 
 # Timeouts / cleanup timers (seconds).
-INFO_TIMEOUT = env_int("INFO_TIMEOUT", 180)      # /api/info yt-dlp timeout
-REAP_INTERVAL = env_int("REAP_INTERVAL", 120)    # cleanup sweep period
-JOB_TTL = env_int("JOB_TTL", 300)                # drop finished jobs after this
-ORPHAN_TTL = env_int("ORPHAN_TTL", 3600)         # drop stray temp dirs after this
+INFO_TIMEOUT = env_int("INFO_TIMEOUT", 180)
+REAP_INTERVAL = env_int("REAP_INTERVAL", 120)
+JOB_TTL = env_int("JOB_TTL", 300)
+ORPHAN_TTL = env_int("ORPHAN_TTL", 3600)
 
 # Proxy for yt-dlp. "socks://" is normalised to "socks5h://" so DNS is resolved
 # on the proxy side — important when the client's DNS/YouTube is blocked.
