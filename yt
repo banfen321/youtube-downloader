@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# yt — a thin yt-dlp + ffmpeg wrapper for downloading from the command line
+# (the web service is the primary interface; this is handy for one-offs).
+#
+# Subcommands:
+#   mp3   <URL...>            MP3 320k CBR + JPEG cover + tags
+#   audio <URL...>            best audio without re-encoding (.m4a/.opus)
+#   video <URL...> [QUALITY]  video+audio as mkv; QUALITY = 2160|1440|1080|720|480|best
+#   formats <URL>             list all available formats
+#   update                    update yt-dlp itself
+#
+# Files are written to the current directory (or $YT_OUT if set).
+# Set $YT_PROXY (socks://user:pass@host:port) to route through a proxy.
+
+set -euo pipefail
+
+OUT="${YT_OUT:-.}"
+TEMPLATE="$OUT/%(title)s [%(id)s].%(ext)s"
+
+die() { echo "yt: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null || die "missing '$1'"; }
+need yt-dlp; need ffmpeg
+
+[ $# -ge 1 ] || die "usage: yt <mp3|audio|video|formats|update> ..."
+cmd="$1"; shift
+
+COMMON=(
+  --no-overwrites
+  --continue
+  --retries 10
+  --fragment-retries 10
+  --concurrent-fragments 4
+  --ignore-errors
+  --no-playlist
+  --remote-components ejs:github   # EJS solver for the n-challenge (else storyboards only)
+)
+
+# Optional proxy from the environment; socks:// -> socks5h:// (DNS via proxy).
+if [ -n "${YT_PROXY:-}" ]; then
+  case "$YT_PROXY" in
+    socks://*) YT_PROXY="socks5h://${YT_PROXY#socks://}" ;;
+  esac
+  COMMON+=(--proxy "$YT_PROXY")
+fi
+
+case "$cmd" in
+  mp3)
+    [ $# -ge 1 ] || die "need at least one URL"
+    yt-dlp "${COMMON[@]}" \
+      -f "bestaudio/best" \
+      -x --audio-format mp3 --audio-quality 320K \
+      --embed-thumbnail --convert-thumbnails jpg \
+      --add-metadata \
+      --parse-metadata "%(artist,creator,uploader)s:%(meta_artist)s" \
+      --parse-metadata "%(album,playlist,title)s:%(meta_album)s" \
+      --parse-metadata "%(track,title)s:%(meta_title)s" \
+      -o "$TEMPLATE" "$@"
+    ;;
+  audio)
+    [ $# -ge 1 ] || die "need at least one URL"
+    yt-dlp "${COMMON[@]}" \
+      -f "bestaudio" \
+      --embed-thumbnail --add-metadata \
+      -o "$TEMPLATE" "$@"
+    ;;
+  video)
+    [ $# -ge 1 ] || die "need at least one URL"
+    quality="best"
+    case "${!#}" in
+      2160|1440|1080|720|480|360|best) quality="${!#}"; set -- "${@:1:$(($#-1))}" ;;
+    esac
+    if [ "$quality" = "best" ]; then
+      fmt="bestvideo+bestaudio/best"
+    else
+      fmt="bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]"
+    fi
+    yt-dlp "${COMMON[@]}" \
+      -f "$fmt" \
+      --merge-output-format mkv \
+      --embed-thumbnail --embed-metadata --embed-subs --sub-langs "en,ru" \
+      -o "$TEMPLATE" "$@"
+    ;;
+  formats)
+    [ $# -eq 1 ] || die "need exactly one URL"
+    yt-dlp -F "$1"
+    ;;
+  update)
+    yt-dlp -U
+    ;;
+  *)
+    die "unknown subcommand '$cmd'"
+    ;;
+esac

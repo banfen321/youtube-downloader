@@ -1,0 +1,22 @@
+services:
+  youtube-downloader:
+    build: .
+    image: youtube-downloader:latest
+    container_name: youtube-downloader
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Pull the latest yt-dlp on every start (set to 0 to disable).
+      - YTDLP_UPDATE=1
+      # Optional SOCKS/HTTP proxy for yt-dlp; value comes from .env.
+      - YT_PROXY=${YT_PROXY:-}
+      # Cookies live in the mounted ./data dir; the UI can write them too.
+      - YT_COOKIES=/data/cookies.txt
+    volumes:
+      # Persistent dir for cookies.txt (rw: yt-dlp rotates the session tokens).
+      - ./data:/data
+    tmpfs:
+      # Downloads happen in /tmp (RAM, never written to disk). The size cap makes
+      # it impossible to exhaust the host even if a job hangs.
+      - /tmp:size=10g

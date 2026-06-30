@@ -1,0 +1,13 @@
+# secrets & runtime data — never commit these
+.env
+data/*
+!data/.gitkeep
+
+# python
+__pycache__/
+*.py[cod]
+
+# editor / OS / misc
+.claude/
+.DS_Store
+*.bak
