@@ -31,12 +31,38 @@ import uuid
 from flask import Flask, jsonify, make_response, render_template, request, send_file
 
 app = Flask(__name__)
-# Cap the request body so an oversized cover upload can't exhaust memory.
-app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
+
 
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
+#
+# Every tunable below can be overridden through an environment variable; the
+# defaults reproduce the previous hardcoded behaviour. See .env.example / README.
+
+
+def env_str(name, default):
+    return os.environ.get(name, default).strip() or default
+
+
+def env_int(name, default):
+    """Read an int env var, falling back to ``default`` on missing/garbage."""
+    try:
+        return int(os.environ.get(name, "").strip())
+    except ValueError:
+        return default
+
+
+def env_bool(name, default):
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+# Cap the request body so an oversized cover upload can't exhaust memory.
+MAX_UPLOAD_MB = env_int("MAX_UPLOAD_MB", 64)
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 
 # Only accept YouTube links; anything else would turn this into an open proxy.
 YOUTUBE_URL_RE = re.compile(
@@ -45,6 +71,28 @@ YOUTUBE_URL_RE = re.compile(
 
 QUALITIES = {"best", "2160", "1440", "1080", "720", "480", "360"}
 MODES = {"mp3", "audio", "video"}
+
+# UI defaults applied when the request omits them.
+DEFAULT_MODE = env_str("DEFAULT_MODE", "mp3")
+DEFAULT_QUALITY = env_str("DEFAULT_QUALITY", "best")
+
+# MP3 transcode / cover settings.
+MP3_BITRATE = env_str("MP3_BITRATE", "320k")     # libmp3lame -b:a
+COVER_MAX_PX = env_int("COVER_MAX_PX", 1200)     # longest cover edge
+COVER_QUALITY = env_int("COVER_QUALITY", 5)      # ffmpeg -q:v (2=best..31=worst)
+
+# yt-dlp robustness knobs.
+YTDLP_RETRIES = env_int("YTDLP_RETRIES", 10)
+YTDLP_CONCURRENT_FRAGMENTS = env_int("YTDLP_CONCURRENT_FRAGMENTS", 4)
+# The EJS challenge solver is required for most videos; expose a kill switch in
+# case GitHub is unreachable and you only need already-unlocked formats.
+YTDLP_USE_EJS = env_bool("YTDLP_USE_EJS", True)
+
+# Timeouts / cleanup timers (seconds).
+INFO_TIMEOUT = env_int("INFO_TIMEOUT", 180)      # /api/info yt-dlp timeout
+REAP_INTERVAL = env_int("REAP_INTERVAL", 120)    # cleanup sweep period
+JOB_TTL = env_int("JOB_TTL", 300)                # drop finished jobs after this
+ORPHAN_TTL = env_int("ORPHAN_TTL", 3600)         # drop stray temp dirs after this
 
 # Proxy for yt-dlp. "socks://" is normalised to "socks5h://" so DNS is resolved
 # on the proxy side — important when the client's DNS/YouTube is blocked.
@@ -60,18 +108,19 @@ COOKIES = os.environ.get("YT_COOKIES", "").strip()
 YTDLP_COMMON = [
     "--no-playlist",
     "--no-overwrites",
-    "--retries", "10",
-    "--fragment-retries", "10",
-    "--concurrent-fragments", "4",
-    # Fetch the EJS challenge-solver from GitHub; without it YouTube only returns
-    # storyboards (no real audio/video formats) for many videos.
-    "--remote-components", "ejs:github",
+    "--retries", str(YTDLP_RETRIES),
+    "--fragment-retries", str(YTDLP_RETRIES),
+    "--concurrent-fragments", str(YTDLP_CONCURRENT_FRAGMENTS),
     # Machine-readable progress lines we parse for the progress bar.
     "--newline",
     "--progress-template",
     "download:###%(progress._percent_str)s|%(progress._speed_str)s|"
     "%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s",
 ]
+if YTDLP_USE_EJS:
+    # Fetch the EJS challenge-solver from GitHub; without it YouTube only returns
+    # storyboards (no real audio/video formats) for many videos.
+    YTDLP_COMMON += ["--remote-components", "ejs:github"]
 
 # --------------------------------------------------------------------------- #
 # yt-dlp command builders
@@ -203,14 +252,14 @@ def transcode_mp3(job_id, src, dst, meta, cover_path, duration):
         cmd += [
             "-i", cover_path, "-map", "0:a", "-map", "1:v",
             "-c:v", "mjpeg", "-pix_fmt", "yuvj420p",
-            "-vf", "scale='min(1200,iw)':-2", "-q:v", "5",
+            "-vf", f"scale='min({COVER_MAX_PX},iw)':-2", "-q:v", str(COVER_QUALITY),
             "-metadata:s:v", "title=Album cover",
             "-metadata:s:v", "comment=Cover (front)",
             "-disposition:v", "attached_pic",
         ]
     else:
         cmd += ["-map", "0:a"]
-    cmd += ["-c:a", "libmp3lame", "-b:a", "320k", "-id3v2_version", "3"]
+    cmd += ["-c:a", "libmp3lame", "-b:a", MP3_BITRATE, "-id3v2_version", "3"]
     for key in ("title", "artist", "album"):
         value = (meta.get(key) or "").strip()
         if value:
@@ -346,22 +395,22 @@ def reaper():
     """Periodically drop finished jobs and orphaned temp dirs so /tmp can't grow."""
     tmp = tempfile.gettempdir()
     while True:
-        time.sleep(120)
+        time.sleep(REAP_INTERVAL)
         now = time.time()
         with JOBS_LOCK:
-            # Finished jobs (delivered or not) are cleaned 5 min after completion;
-            # a safety net for the call_on_close cleanup, which can lag.
+            # Finished jobs (delivered or not) are cleaned JOB_TTL seconds after
+            # completion; a safety net for call_on_close cleanup, which can lag.
             for job_id in [j for j, v in JOBS.items()
-                           if v["status"] != "running" and now - v["ts"] > 300]:
+                           if v["status"] != "running" and now - v["ts"] > JOB_TTL]:
                 shutil.rmtree(JOBS[job_id]["workdir"], ignore_errors=True)
                 JOBS.pop(job_id, None)
             active = {v["workdir"] for v in JOBS.values()}
 
-        # Sweep any temp dir not tied to a live job and older than an hour.
+        # Sweep any temp dir not tied to a live job and older than ORPHAN_TTL.
         for d in (glob.glob(os.path.join(tmp, "ytdl_*"))
                   + glob.glob(os.path.join(tmp, "ytinfo_*"))):
             try:
-                if d not in active and now - os.path.getmtime(d) > 3600:
+                if d not in active and now - os.path.getmtime(d) > ORPHAN_TTL:
                     shutil.rmtree(d, ignore_errors=True)
             except OSError:
                 pass
@@ -427,7 +476,7 @@ def info():
                 "--write-thumbnail", "--convert-thumbnails", "jpg",
                 "-o", os.path.join(workdir, "%(id)s.%(ext)s"), url]
 
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=INFO_TIMEOUT)
         persist_cookies(cookie_copy)
         if proc.returncode != 0:
             return jsonify(error="failed to fetch info",
@@ -463,8 +512,8 @@ def download():
     """Start a download job and return its id; progress is polled separately."""
     data = request.get_json(force=True, silent=True) or {}
     url = (data.get("url") or "").strip()
-    mode = data.get("mode") or "mp3"
-    quality = data.get("quality") or "best"
+    mode = data.get("mode") or DEFAULT_MODE
+    quality = data.get("quality") or DEFAULT_QUALITY
 
     if not YOUTUBE_URL_RE.match(url):
         return jsonify(error="YouTube links only"), 400

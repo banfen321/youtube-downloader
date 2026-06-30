@@ -19,7 +19,13 @@ build-image:
   services:
     - docker:27-dind
   variables:
+    # dind with TLS: the daemon listens on 2376 with certs under /certs/client.
+    # Without these the docker client tries plain tcp://docker:2375 and fails
+    # with "Cannot connect to the Docker daemon".
     DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: "tcp://docker:2376"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:

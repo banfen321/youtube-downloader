@@ -6,12 +6,15 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    # All tunables (proxy, bitrate, cover size, timeouts, cleanup, ...) are read
+    # from .env if it exists. See .env.example for the full list. Optional so the
+    # service still starts with no .env present.
+    env_file:
+      - path: .env
+        required: false
     environment:
-      # Pull the latest yt-dlp on every start (set to 0 to disable).
-      - YTDLP_UPDATE=1
-      # Optional SOCKS/HTTP proxy for yt-dlp; value comes from .env.
-      - YT_PROXY=${YT_PROXY:-}
-      # Cookies live in the mounted ./data dir; the UI can write them too.
+      # Cookies live in the mounted ./data dir; this path is tied to the volume
+      # below, so it stays here rather than in .env.
       - YT_COOKIES=/data/cookies.txt
     volumes:
       # Persistent dir for cookies.txt (rw: yt-dlp rotates the session tokens).

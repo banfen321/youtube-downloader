@@ -58,12 +58,51 @@ Browser ──► Flask (app.py) ──► yt-dlp ──► ffmpeg
 
 ## Configuration
 
-| Variable       | Default            | Description                                   |
-|----------------|--------------------|-----------------------------------------------|
-| `PORT`         | `8080`             | HTTP port                                     |
-| `YTDLP_UPDATE` | `1`                | Pull the latest yt-dlp on container start     |
-| `YT_PROXY`     | *(empty)*          | SOCKS/HTTP proxy (`socks://` → `socks5h://`)   |
-| `YT_COOKIES`   | `/data/cookies.txt`| Path to a Netscape cookies.txt                 |
+Everything is configured through environment variables (e.g. via `.env`). All are
+optional — the defaults below match the built-in behaviour. See
+[`.env.example`](.env.example) for a ready-to-copy template.
+
+**Network**
+
+| Variable       | Default             | Description                                   |
+|----------------|---------------------|-----------------------------------------------|
+| `YT_PROXY`     | *(empty)*           | SOCKS/HTTP proxy (`socks://` → `socks5h://`)   |
+| `YT_COOKIES`   | `/data/cookies.txt` | Path to a Netscape cookies.txt                 |
+
+**Server**
+
+| Variable          | Default | Description                                          |
+|-------------------|---------|------------------------------------------------------|
+| `PORT`            | `8080`  | HTTP port                                            |
+| `YTDLP_UPDATE`    | `1`     | Pull the latest yt-dlp on container start            |
+| `MAX_UPLOAD_MB`   | `64`    | Request-body cap (guards against huge cover uploads) |
+| `DEFAULT_MODE`    | `mp3`   | Mode used when the UI omits it (`mp3`/`audio`/`video`) |
+| `DEFAULT_QUALITY` | `best`  | Default video quality cap                            |
+
+**MP3 / cover encoding**
+
+| Variable        | Default | Description                                        |
+|-----------------|---------|----------------------------------------------------|
+| `MP3_BITRATE`   | `320k`  | libmp3lame target bitrate (e.g. `192k`, `256k`)    |
+| `COVER_MAX_PX`  | `1200`  | Longest edge of the embedded cover (downscaled)    |
+| `COVER_QUALITY` | `5`     | JPEG quality, ffmpeg `-q:v` (`2`=best .. `31`=worst) |
+
+**yt-dlp behaviour**
+
+| Variable                     | Default | Description                                  |
+|------------------------------|---------|----------------------------------------------|
+| `YTDLP_RETRIES`              | `10`    | Retries for whole-file and fragments         |
+| `YTDLP_CONCURRENT_FRAGMENTS` | `4`     | Parallel fragment downloads                  |
+| `YTDLP_USE_EJS`              | `1`     | `0` disables the GitHub EJS challenge solver |
+
+**Timeouts & cleanup (seconds)**
+
+| Variable        | Default | Description                                             |
+|-----------------|---------|--------------------------------------------------------|
+| `INFO_TIMEOUT`  | `180`   | Max time for the preview/info fetch                    |
+| `REAP_INTERVAL` | `120`   | How often the cleanup sweep runs                       |
+| `JOB_TTL`       | `300`   | Delete a finished job's files this long after it ends  |
+| `ORPHAN_TTL`    | `3600`  | Delete stray temp dirs older than this                 |
 
 ## Proxy & cookies (when YouTube is blocked)
 
